@@ -1,0 +1,97 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1b5e20"><title>Monopoly Wallet</title>
+<style>
+:root{--c:#1b5e20;--bg:#f4f6f4;--tx:#1c1f1c}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;font-family:system-ui,Roboto,sans-serif;background:var(--bg);color:var(--tx);min-height:100vh}
+.wrap{max-width:480px;margin:0 auto;padding:16px}
+h1{font-size:24px;margin:8px 0 16px;color:var(--c)}
+.card{background:#fff;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 1px 4px #0002}
+label{display:block;font-size:13px;color:#555;margin:12px 0 6px}
+input{width:100%;font-size:18px;padding:14px;border:2px solid #ddd;border-radius:12px;outline:none}
+input:focus{border-color:var(--c)}
+button{font-size:17px;font-weight:600;border:0;border-radius:12px;padding:14px;width:100%;background:var(--c);color:#fff;margin-top:14px}
+button.alt{background:#e8ebe8;color:#222}button.red{background:#c62828}
+.tabs{display:flex;gap:8px}.tabs button{margin:0}
+.sw{display:flex;flex-wrap:wrap;gap:12px}
+.sw div{width:48px;height:48px;border-radius:50%;border:4px solid #fff;box-shadow:0 0 0 2px #ccc}
+.sw div.on{box-shadow:0 0 0 4px #111}.sw div.off{opacity:.2}
+.err{color:#c62828;margin-top:10px;min-height:20px;font-size:14px}
+.me{color:#fff;border-radius:20px;padding:20px;margin-bottom:14px;background:var(--c)}
+.me small{opacity:.85}.me .big{font-size:42px;font-weight:700;margin-top:4px}
+.p{display:flex;align-items:center;gap:12px;color:#fff;border-radius:14px;padding:14px;margin-bottom:10px;font-size:18px}
+.p b{flex:1}.p span{font-weight:700}.p.tap{cursor:pointer}
+.tag{font-size:11px;background:#fff3;border-radius:8px;padding:2px 6px;margin-left:6px}
+.log div{padding:8px 0;border-bottom:1px solid #eee;font-size:14px}.log i{color:#888;font-style:normal;margin-right:8px}
+#sheet{position:fixed;inset:0;background:#0007;display:none;align-items:flex-end;z-index:9}
+#sheet .in{background:#fff;width:100%;max-width:480px;margin:0 auto;border-radius:20px 20px 0 0;padding:18px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.chips button{width:auto;margin:0;padding:10px 14px;font-size:15px;background:#e8ebe8;color:#222}
+.row{display:flex;gap:10px}.row button{margin-top:14px}
+.code{font-size:13px;opacity:.9;float:right;background:#fff3;border-radius:8px;padding:4px 10px}
+</style></head><body><div class="wrap" id="app"></div>
+<div id="sheet"><div class="in" id="sin"></div></div>
+<script>
+const COLORS=["#e53935", "#1e88e5", "#43a047", "#fb8c00", "#8e24aa", "#00897b", "#d81b60", "#6d4c41"],$=s=>document.querySelector(s);
+let S=JSON.parse(localStorage.mw||"null"),mode="create",pick=null,taken=[],timer=null,st=null,target=null;
+const money=n=>"$"+Number(n).toLocaleString();
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function call(p,b){try{const r=await fetch("/api/"+p,b?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)}:{});return await r.json()}catch(e){return{error:"Connection problem",net:1}}}
+function swatches(){return `<div class="sw">${COLORS.map(c=>`<div data-c="${c}" class="${pick==c?"on":""} ${taken.includes(c)?"off":""}" style="background:${c}"></div>`).join("")}</div>`}
+function home(){
+ document.documentElement.style.setProperty("--c",pick||"#1b5e20");
+ $("#app").innerHTML=`<h1>🎩 Monopoly Wallet</h1><div class="card">
+ <div class="tabs"><button class="${mode=="create"?"":"alt"}" id="tc">Host game</button><button class="${mode=="join"?"":"alt"}" id="tj">Join game</button></div>
+ ${mode=="join"?`<label>Game code</label><input id="code" maxlength="4" autocapitalize="characters" placeholder="e.g. K7M2">`:`<label>Starting money per player</label><input id="start" type="number" inputmode="numeric" value="1500">`}
+ <label>Your name</label><input id="name" maxlength="14" placeholder="Player name">
+ <label>Choose your colour</label>${swatches()}
+ <div class="err" id="err"></div><button id="go">${mode=="create"?"Create game (you are the Banker)":"Join game"}</button></div>`;
+ $("#tc").onclick=()=>{mode="create";taken=[];home()};$("#tj").onclick=()=>{mode="join";home()};
+ document.querySelectorAll(".sw div").forEach(d=>d.onclick=()=>{if(taken.includes(d.dataset.c))return;keep();pick=d.dataset.c;home();restore()});
+ if($("#code"))$("#code").oninput=async e=>{e.target.value=e.target.value.toUpperCase();if(e.target.value.length==4){const r=await call("taken?code="+e.target.value);taken=r.taken||[];if(taken.includes(pick))pick=null;keep();home();restore()}};
+ $("#go").onclick=submit;
+}
+let kept={};function keep(){["code","name","start"].forEach(i=>{if($("#"+i))kept[i]=$("#"+i).value})}
+function restore(){for(const i in kept)if($("#"+i))$("#"+i).value=kept[i]}
+async function submit(){
+ const b={name:$("#name").value,color:pick};let r;
+ if(mode=="create"){b.start=$("#start").value;r=await call("create",b)}else{b.code=$("#code").value;r=await call("join",b)}
+ if(r.error){$("#err").textContent=r.error;return}
+ S={code:r.code,token:r.token};localStorage.mw=JSON.stringify(S);start();
+}
+function start(){poll();clearInterval(timer);timer=setInterval(poll,3000)}
+async function poll(){
+ const r=await call(`state?code=${S.code}&token=${S.token}`);
+ if(r.net)return;if(r.error){localStorage.removeItem("mw");S=null;clearInterval(timer);return home()}
+ st=r;draw();
+}
+function draw(){
+ const me=st.players.find(p=>p.id==st.me);
+ document.documentElement.style.setProperty("--c",me.color);
+ document.querySelector("meta[name=theme-color]").content=me.color;
+ $("#app").innerHTML=`<div class="me"><span class="code" id="cp">Code: <b>${S.code}</b> 📋</span><small>${esc(me.name)}${st.host?" • Banker":""}</small><div class="big">${money(me.balance)}</div></div>
+ ${st.host?`<button class="alt" id="all" style="margin:0 0 12px">➕ Pay / charge everyone</button><small style="color:#666">Tap a player to add or deduct money</small><div style="height:8px"></div>`:""}
+ ${st.players.map(p=>`<div class="p ${st.host?"tap":""}" data-id="${p.id}" style="background:${p.color}"><b>${esc(p.name)}${p.id==0?'<span class="tag">Banker</span>':""}${p.id==st.me?'<span class="tag">You</span>':""}</b><span>${money(p.balance)}</span></div>`).join("")}
+ <div class="card log"><b>Recent activity</b>${st.log.map(l=>`<div><i>${new Date(l.t*1000).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</i>${esc(l.m)}</div>`).join("")}</div>
+ <button class="alt" id="leave">Leave game</button>`;
+ $("#cp").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(S.code)};
+ $("#leave").onclick=()=>{if(confirm("Leave this game on this phone?")){localStorage.removeItem("mw");S=null;clearInterval(timer);pick=null;home()}};
+ if(st.host){document.querySelectorAll(".p").forEach(d=>d.onclick=()=>sheet(+d.dataset.id));$("#all").onclick=()=>sheet("all")}
+}
+function sheet(id){
+ target=id;const p=st.players.find(x=>x.id==id);
+ $("#sin").innerHTML=`<b style="font-size:20px">${id=="all"?"Everyone":esc(p.name)}</b>${id=="all"?"":` <span style="color:#666">(${money(p.balance)})</span>`}
+ <label>Amount</label><input id="amt" type="number" inputmode="numeric" placeholder="0">
+ <div class="chips">${[50,100,200,500].map(n=>`<button data-n="${n}">${n}</button>`).join("")}</div>
+ <label>Note (optional)</label><input id="note" maxlength="30" placeholder="Rent, passed GO, tax...">
+ <div class="err" id="serr"></div>
+ <div class="row"><button class="red" id="ded">Deduct</button><button id="add">Add</button></div><button class="alt" id="x">Cancel</button>`;
+ $("#sheet").style.display="flex";
+ document.querySelectorAll(".chips button").forEach(b=>b.onclick=()=>$("#amt").value=b.dataset.n);
+ $("#x").onclick=()=>$("#sheet").style.display="none";
+ const go=async op=>{const r=await call("adjust",{...S,target,op,amount:$("#amt").value,note:$("#note").value});
+  if(r.error){$("#serr").textContent=r.error;return}$("#sheet").style.display="none";poll()};
+ $("#add").onclick=()=>go("add");$("#ded").onclick=()=>go("deduct");
+}
+S?start():home();
+</script></body></html>
