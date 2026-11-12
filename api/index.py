@@ -13,11 +13,17 @@ _MEM = {}  # local-dev fallback when no Redis env vars are set
 def redis(*cmds):
     """Run Redis commands in one round trip; returns list of results."""
     if not URL:
+        if os.environ.get("VERCEL"):
+            raise RuntimeError("Database not connected: add Upstash Redis in Vercel Storage, then redeploy")
         return _mem(cmds)
     req = urllib.request.Request(URL.rstrip("/") + "/pipeline", data=json.dumps(cmds).encode(),
                                  headers={"Authorization": "Bearer " + TOKEN, "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=8) as r:
-        return [o.get("result") for o in json.load(r)]
+        out = json.load(r)
+    for o in out:
+        if o.get("error"):
+            raise RuntimeError("Redis error: " + str(o["error"]))
+    return [o.get("result") for o in out]
 
 
 def _mem(cmds):
@@ -38,6 +44,17 @@ def _mem(cmds):
         elif c == "HGETALL": out.append([x for kv in _MEM.get(k, {}).items() for x in kv])
         else: out.append(None)  # EXPIRE etc.
     return out
+
+
+@app.errorhandler(Exception)
+def crash(e):
+    return jsonify(error=str(e)[:200]), 500
+
+
+@app.route("/api/health")
+def health():
+    redis(("SET", "health", "ok"))
+    return jsonify(ok=True, redis="connected" if URL else "memory (local only)")
 
 
 def err(msg, code=400):
@@ -132,4 +149,3 @@ def route(path):
         redis(*[("HINCRBY", bk, p["id"], sign * amt) for p in targets], *log(code, text), *touch(code))
         return jsonify(ok=True)
     return err("Unknown request", 404)
-      
